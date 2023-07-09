@@ -1,4 +1,5 @@
-import { TextDocument, SymbolInformation, SymbolKind, Range, Position } from 'vscode-languageserver-types';
+import { SymbolInformation, SymbolKind, Range, Position } from 'vscode-languageserver-types';
+import type { TextDocument } from 'vscode-languageserver-textdocument';
 
 import {
   StylusNode,
@@ -11,7 +12,7 @@ import {
   isVariableNode
 } from './parser';
 
-import * as _ from 'lodash';
+import _ from 'lodash';
 
 /**
  * Generates hash for symbol for comparison with other symbols

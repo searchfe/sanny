@@ -1,6 +1,6 @@
 ## San Language Server
 
-San Language Server is a language server implementation compatible with [`language-server-protocol`](https://github.com/Microsoft/language-server-protocol).
+[VLS](https://www.npmjs.com/package/vls) (Vue Language Server) is a language server implementation compatible with [Language Server Protocol](https://github.com/microsoft/language-server-protocol).
 
 Sanny is the VS Code client consuming `san Language Server`.
 

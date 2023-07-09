@@ -1,4 +1,5 @@
-import { TextDocument, Location, Range, SymbolInformation, SymbolKind } from 'vscode-languageserver-types';
+import { Location, Range, SymbolInformation, SymbolKind } from 'vscode-languageserver-types';
+import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { HTMLDocument, Node } from '../parser/htmlParser';
 
 export function findDocumentSymbols(document: TextDocument, htmlDocument: HTMLDocument): SymbolInformation[] {
@@ -21,18 +22,20 @@ function provideFileSymbolsInternal(
     return;
   }
   const name = nodeToName(node);
-  const location = Location.create(
-    document.uri,
-    Range.create(document.positionAt(node.start), document.positionAt(node.end))
-  );
-  const symbol: SymbolInformation = {
-    name,
-    location,
-    containerName: container,
-    kind: <SymbolKind>SymbolKind.Field,
-  };
+  if (name !== '') {
+    const location = Location.create(
+      document.uri,
+      Range.create(document.positionAt(node.start), document.positionAt(node.end))
+    );
+    const symbol: SymbolInformation = {
+      name,
+      location,
+      containerName: container,
+      kind: <SymbolKind>SymbolKind.Field
+    };
 
-  symbols.push(symbol);
+    symbols.push(symbol);
+  }
 
   node.children.forEach((child) => {
     provideFileSymbolsInternal(document, child, name, symbols);
@@ -49,6 +52,7 @@ function nodeToName(node: Node): string {
   if (node.attributes) {
     const id = node.attributes['id'];
     const classes = node.attributes['class'];
+    const slotRelatedAttrs = getVueSlotAttributes(node);
 
     if (id) {
       name += `#${id.replace(/[\"\']/g, '')}`;
@@ -61,7 +65,21 @@ function nodeToName(node: Node): string {
         .map((className) => `.${className}`)
         .join('');
     }
+
+    if (slotRelatedAttrs.length > 0) {
+      name += `[${slotRelatedAttrs.join(' ')}]`;
+    }
   }
 
   return name;
+}
+
+function getVueSlotAttributes(node: Node) {
+  const vueSlotAttributes = node.attributeNames.filter(attr => attr.startsWith('#') || attr.startsWith('v-slot:'));
+
+  const slotName = node.attributes?.name;
+  if (node.tag === 'slot' && slotName) {
+    vueSlotAttributes.push(`name=${slotName}`);
+  }
+  return vueSlotAttributes;
 }

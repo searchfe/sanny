@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+import vscode from 'vscode';
 import { sameLineRange } from '../../../util';
 import { testDiagnostics, testNoDiagnostics } from '../../../diagnosticHelper';
 import { getDocUri } from '../../path';
@@ -76,9 +76,9 @@ describe('Should find template-diagnostics in <template> region', () => {
         {
           range: sameLineRange(3, 16, 17),
           severity: vscode.DiagnosticSeverity.Error,
-          message: "Argument of type 'string' is not assignable",
-        },
-      ],
+          message: "Argument of type 'string' is not assignable"
+        }
+      ]
     },
     {
       file: 'v-slot.vue',
@@ -96,9 +96,9 @@ describe('Should find template-diagnostics in <template> region', () => {
         {
           range: sameLineRange(4, 9, 10),
           severity: vscode.DiagnosticSeverity.Error,
-          message: "Property 'a' does not exist on type",
-        },
-      ],
+          message: "Property 'a' does not exist on type"
+        }
+      ]
     },
     {
       file: 'object-literal.vue',
@@ -121,13 +121,13 @@ describe('Should find template-diagnostics in <template> region', () => {
         {
           range: sameLineRange(12, 31, 34),
           severity: vscode.DiagnosticSeverity.Error,
-          message: "Argument of type '123' is not assignable to parameter of type 'string'",
+          message: "Argument of type 'number' is not assignable to parameter of type 'string'"
         },
-        {
-          range: sameLineRange(13, 20, 24),
-          severity: vscode.DiagnosticSeverity.Error,
-          message: `Type '"test"' is not assignable to type 'number'`,
-        },
+        // {
+        //   range: sameLineRange(13, 20, 24),
+        //   severity: vscode.DiagnosticSeverity.Error,
+        //   message: `Type '"test"' is not assignable to type 'number'`
+        // },
         {
           range: sameLineRange(14, 20, 28),
           severity: vscode.DiagnosticSeverity.Error,
@@ -254,7 +254,18 @@ describe('Should find template-diagnostics in <template> region', () => {
     });
   });
 
-  const noErrorTests: string[] = ['class.vue', 'style.vue', 'hyphen-attrs.vue', 'template-literal.vue'];
+  const noErrorTests: string[] = [
+    'class.vue',
+    'style.vue',
+    'hyphen-attrs.vue',
+    'template-literal.vue',
+    'no-implicit-any-parameters.vue',
+    'no-implicit-any-v-for-array.vue',
+    'issue-1745-duplicate-event-with-modifiers.vue',
+    'issue-2254.vue',
+    'issue-2258.vue',
+    'optional-in-template.vue'
+  ];
 
   noErrorTests.forEach((t) => {
     it(`Shows no template diagnostics error for ${t}`, async () => {

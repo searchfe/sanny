@@ -1,5 +1,5 @@
-import { TextDocument } from 'vscode-languageserver-types';
-import * as assert from 'assert';
+import { TextDocument } from 'vscode-languageserver-textdocument';
+import assert from 'assert';
 import { parseVueDocumentRegions } from '../vueDocumentRegionParser';
 import { getSingleLanguageDocument, getSingleTypeDocument, getLanguageRangesOfType } from '../embeddedSupport';
 
@@ -153,7 +153,7 @@ suite('Template region positions', () => {
         // prettier-ignore
         '',
         '  <p>Test</p>',
-        '',
+        ''
       ].join('\n')
     );
   });
@@ -174,7 +174,7 @@ p Test
         // prettier-ignore
         '',
         'p Test',
-        '',
+        ''
       ].join('\n')
     );
   });
@@ -200,7 +200,7 @@ suite('Embedded <template> ', () => {
         '  <template>',
         '    <p>Test</p>',
         '  </template>',
-        '',
+        ''
       ].join('\n')
     );
   });

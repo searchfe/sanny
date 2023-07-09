@@ -1,4 +1,4 @@
-import { TextDocument } from 'vscode-languageserver-types';
+import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { createScanner, TokenType, Scanner } from '../modes/template/parser/htmlScanner';
 import { removeQuotes } from '../utils/strings';
 import { LanguageId } from './embeddedSupport';
@@ -23,6 +23,7 @@ export function parseVueDocumentRegions(document: TextDocument) {
   let lastAttributeName = '';
   let languageIdFromType: LanguageId | '' = '';
   const importedScripts: string[] = [];
+  let stakes = 0;
 
   let token = scanner.scan();
   while (token !== TokenType.EOS) {
@@ -48,8 +49,9 @@ export function parseVueDocumentRegions(document: TextDocument) {
         languageIdFromType = '';
         break;
       case TokenType.StartTag:
+        stakes++;
         const tagName = scanner.getTokenText();
-        if (tagName === 'template') {
+        if (tagName === 'template' && stakes === 1) {
           const templateRegion = scanTemplateRegion(scanner, text);
           if (templateRegion) {
             regions.push(templateRegion);
@@ -75,7 +77,9 @@ export function parseVueDocumentRegions(document: TextDocument) {
         }
         lastAttributeName = '';
         break;
+      case TokenType.StartTagSelfClose:
       case TokenType.EndTagClose:
+        stakes--;
         lastAttributeName = '';
         languageIdFromType = '';
         break;
@@ -103,7 +107,7 @@ function scanTemplateRegion(scanner: Scanner, text: string): EmbeddedRegion | nu
   while (unClosedTemplate !== 0) {
     // skip parsing on non html syntax, just search terminator
     if (token === TokenType.AttributeValue && languageId !== 'san-html') {
-      while (token !== TokenType.StartTagClose) {
+      while (![TokenType.StartTagClose, TokenType.StartTagSelfClose].includes(token)) {
         token = scanner.scan();
       }
       start = scanner.getTokenEnd();

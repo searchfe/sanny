@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+import vscode from 'vscode';
 
 export function position(line: number, char: number) {
   return new vscode.Position(line, char);
@@ -15,6 +15,9 @@ export function location(uri: vscode.Uri, startLine: number, startChar: number, 
 export function sameLineLocation(uri: vscode.Uri, line: number, startChar: number, endChar: number) {
   return new vscode.Location(uri, sameLineRange(line, startChar, endChar));
 }
+export function textEdit(range: vscode.Range, newText: string) {
+  return new vscode.TextEdit(range, newText);
+}
 export function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

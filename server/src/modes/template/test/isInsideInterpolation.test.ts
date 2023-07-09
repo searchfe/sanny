@@ -1,6 +1,6 @@
 import { isInsideInterpolation } from '../services/isInsideInterpolation';
 import { Node } from '../parser/htmlParser';
-import * as assert from 'assert';
+import assert from 'assert';
 
 suite('isInsideInterpolation', () => {
   test('{{ }}', () => {

@@ -1,6 +1,6 @@
 import { TokenType, createScanner } from './htmlScanner';
-import { isEmptyElement } from '../tagProviders/htmlTags';
-import { TextDocument } from 'vscode-languageserver-types';
+import { isVoidElement } from '../tagProviders/htmlTags';
+import type { TextDocument } from 'vscode-languageserver-textdocument';
 
 export class Node {
   public tag?: string;
@@ -90,7 +90,7 @@ export function parse(text: string): HTMLDocument {
         break;
       case TokenType.StartTagClose:
         curr.end = scanner.getTokenEnd(); // might be later set to end tag position
-        if (isEmptyElement(curr.tag) && curr !== htmlDocument) {
+        if (isVoidElement(curr.tag) && curr !== htmlDocument) {
           curr.closed = true;
           curr = curr.parent;
         }

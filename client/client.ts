@@ -1,10 +1,11 @@
-import * as vscode from 'vscode';
+import vscode from 'vscode';
 import {
   LanguageClient,
   RevealOutputChannelOn,
   ServerOptions,
   TransportKind,
   LanguageClientOptions,
+  DocumentFilter
 } from 'vscode-languageclient';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
@@ -12,7 +13,7 @@ import { existsSync } from 'fs';
 export function initializeLanguageClient(vlsModulePath: string, globalSnippetDir: string): LanguageClient {
   const debugOptions = { execArgv: ['--nolazy', '--inspect=6005'] };
 
-  const documentSelector = ['san'];
+  const documentSelector: DocumentFilter[] = [{ language: 'san', scheme: 'file' }];
   const config = vscode.workspace.getConfiguration();
 
   let serverPath;

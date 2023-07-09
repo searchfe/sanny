@@ -1,9 +1,9 @@
-import { T_TypeScript } from '../dependencyService';
 import { parseVueScript } from './preprocess';
-import * as ts from 'typescript';
+import type ts from 'typescript';
 import { isVirtualVueFile } from './util';
+import { RuntimeLibrary } from '../dependencyService';
 
-export function getVueSys(tsModule: T_TypeScript, scriptFileNameSet: Set<string>) {
+export function getVueSys(tsModule: RuntimeLibrary['typescript'], scriptFileNameSet: Set<string>) {
   /**
    * This part is only accessed by TS module resolution
    */

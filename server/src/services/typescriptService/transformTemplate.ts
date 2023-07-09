@@ -1,11 +1,13 @@
-import * as ts from 'typescript';
+import { kebabCase, snakeCase } from 'lodash';
+import type ts from 'typescript';
 import { AST } from 'vue-eslint-parser';
-import { T_TypeScript } from '../dependencyService';
+import { RuntimeLibrary } from '../dependencyService';
 import { walkExpression } from './walkExpression';
 
 export const renderHelperName = '__vlsRenderHelper';
 export const componentHelperName = '__vlsComponentHelper';
 export const iterationHelperName = '__vlsIterationHelper';
+export const componentDataName = '__vlsComponentData';
 
 /**
  * Allowed global variables in templates.
@@ -22,7 +24,16 @@ const vOnScope = ['$event', 'arguments'];
 
 type ESLintVChild = AST.VElement | AST.VExpressionContainer | AST.VText;
 
-export function getTemplateTransformFunctions(ts: T_TypeScript) {
+/**
+ * @param tsModule Loaded TS dependency
+ * @param childComponentNamesInSnakeCase If `VElement`'s name matches one of the child components'
+ * name, generate expression with `${componentHelperName}__${name}`, which will enforce type-check
+ * on props
+ */
+export function getTemplateTransformFunctions(
+  tsModule: RuntimeLibrary['typescript'],
+  childComponentNamesInSnakeCase?: string[]
+) {
   return {
     transformTemplate,
     parseExpression,
@@ -54,22 +65,39 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
    * __vlsComponentHelper('div', { props: { title: this.foo } }, [ ...children... ]);
    */
   function transformElement(node: AST.VElement, code: string, scope: string[]): ts.Expression {
-    return ts.createCall(ts.createIdentifier(componentHelperName), undefined, [
+    /**
+     * `vModel`      -> need info from other components to do type check
+     * `v-bind`      -> do this later
+     * `v-bind:[foo] -> don't do type-check. do make `[]` an interpolation area
+     */
+    const hasUnhandledAttributes = node.startTag.attributes.some(attr => {
+      return isVModel(attr) || (isVBind(attr) && !isVBindShorthand(attr)) || isVBindWithDynamicAttributeName(attr);
+    });
+
+    const identifier =
+      !hasUnhandledAttributes &&
+      childComponentNamesInSnakeCase &&
+      childComponentNamesInSnakeCase.indexOf(snakeCase(node.rawName)) !== -1
+        ? tsModule.createIdentifier(componentHelperName + '__' + snakeCase(node.rawName))
+        : tsModule.createIdentifier(componentHelperName);
+
+    return tsModule.createCall(identifier, undefined, [
       // Pass this value to propagate ThisType in listener handlers
-      ts.createIdentifier('this'),
+      tsModule.createIdentifier('this'),
 
       // Element / Component name
-      ts.createLiteral(node.name),
+      tsModule.createLiteral(node.name),
 
       // Attributes / Directives
-      transformAttributes(node.startTag.attributes, code, scope),
+      transformAttributes(node, node.startTag.attributes, code, scope),
 
       // Children
-      ts.createArrayLiteral(transformChildren(node.children, code, scope)),
+      tsModule.createArrayLiteral(transformChildren(node.children, code, scope))
     ]);
   }
 
   function transformAttributes(
+    node: AST.VElement,
     attrs: (AST.VAttribute | AST.VDirective)[],
     code: string,
     scope: string[]
@@ -133,22 +161,28 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
     //   props: { class: 'title' },
     //   on: { click: __vlsListenerHelper(this, function($event) { this.onClick($event) } }
     // }
-    return ts.createObjectLiteral([
-      ts.createPropertyAssignment('props', ts.createObjectLiteral(data.props)),
-      ts.createPropertyAssignment('on', ts.createObjectLiteral(data.on)),
-      ts.createPropertyAssignment('directives', ts.createArrayLiteral(data.directives)),
+    const propsAssignment = tsModule.createPropertyAssignment('props', tsModule.createObjectLiteral(data.props));
+    tsModule.setSourceMapRange(propsAssignment.name, {
+      pos: node.startTag.range[0] + '<'.length,
+      end: node.startTag.range[0] + '<'.length + node.rawName.length
+    });
+
+    return tsModule.createObjectLiteral([
+      propsAssignment,
+      tsModule.createPropertyAssignment('on', tsModule.createObjectLiteral(data.on)),
+      tsModule.createPropertyAssignment('directives', tsModule.createArrayLiteral(data.directives))
     ]);
   }
 
   function transformNativeAttribute(attr: AST.VAttribute): ts.ObjectLiteralElementLike {
-    return ts.createPropertyAssignment(
-      ts.createStringLiteral(attr.key.name),
-      attr.value ? ts.createLiteral(attr.value.value) : ts.createLiteral(true)
+    return tsModule.createPropertyAssignment(
+      tsModule.createStringLiteral(attr.key.name),
+      attr.value ? tsModule.createLiteral(attr.value.value) : tsModule.createLiteral(true)
     );
   }
 
   function transformVBind(vBind: AST.VDirective, code: string, scope: string[]): ts.ObjectLiteralElementLike {
-    const exp = vBind.value ? transformExpressionContainer(vBind.value, code, scope) : ts.createLiteral(true);
+    const exp = vBind.value ? transformExpressionContainer(vBind.value, code, scope) : tsModule.createLiteral(true);
     return directiveToObjectElement(vBind, exp, code, scope);
   }
 
@@ -162,9 +196,9 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
         // Annotate the expression with `any` because we do not expect type error
         // with bridge type and it. Currently, bridge type should only be used
         // for inferring `$event` type.
-        exp = ts.createAsExpression(
+        exp = tsModule.createAsExpression(
           transformExpressionContainer(vOn.value, code, scope),
-          ts.createKeywordTypeNode(ts.SyntaxKind.AnyKeyword)
+          tsModule.createKeywordTypeNode(tsModule.SyntaxKind.AnyKeyword)
         );
       } else {
         // e.g.
@@ -176,29 +210,29 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
         const newScope = scope.concat(vOnScope);
         const statements =
           !vOnExp || vOnExp.type !== 'VOnExpression'
-            ? [ts.createExpressionStatement(transformExpressionContainer(vOn.value, code, newScope))]
-            : vOnExp.body.map((st) => transformStatement(st, code, newScope));
+            ? [tsModule.createExpressionStatement(transformExpressionContainer(vOn.value, code, newScope))]
+            : vOnExp.body.map(st => transformStatement(st, code, newScope));
 
-        exp = ts.createFunctionExpression(
+        exp = tsModule.createFunctionExpression(
           undefined,
           undefined,
           undefined,
           undefined,
-          [ts.createParameter(undefined, undefined, undefined, '$event')],
+          [tsModule.createParameter(undefined, undefined, undefined, '$event')],
           undefined,
-          ts.createBlock(statements)
+          tsModule.createBlock(statements)
         );
       }
     } else {
       // There are no statement in v-on value
-      exp = ts.createFunctionExpression(
+      exp = tsModule.createFunctionExpression(
         undefined,
         undefined,
         undefined,
         undefined,
         undefined,
         undefined,
-        ts.createBlock([])
+        tsModule.createBlock([])
       );
     }
     return directiveToObjectElement(vOn, exp, code, scope);
@@ -219,17 +253,25 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
       if (name.type === 'VIdentifier') {
         // Attribute name is specified
         // e.g. v-bind:value="foo"
-        return ts.createPropertyAssignment(ts.createStringLiteral(name.name), dirExp);
+        const fullName =
+          dir.key.modifiers.length === 0 || isVBind(dir)
+            ? kebabCase(name.rawName)
+            : [kebabCase(name.rawName), ...dir.key.modifiers.map(m => m.rawName)].join('.');
+        const propNameNode = tsModule.setSourceMapRange(tsModule.createStringLiteral(fullName), {
+          pos: name.range[0],
+          end: name.range[1]
+        });
+        return tsModule.createPropertyAssignment(propNameNode, dirExp);
       } else {
         // Attribute name is dynamic
         // e.g. v-bind:[value]="foo"
-        const propertyName = ts.createComputedPropertyName(transformExpressionContainer(name, code, scope));
-        return ts.createPropertyAssignment(propertyName, dirExp);
+        const propertyName = tsModule.createComputedPropertyName(transformExpressionContainer(name, code, scope));
+        return tsModule.createPropertyAssignment(propertyName, dirExp);
       }
     } else {
       // Attribute name is omitted
       // e.g. v-bind="{ value: foo }"
-      return ts.createSpreadAssignment(dirExp);
+      return tsModule.createSpreadAssignment(dirExp);
     }
   }
 
@@ -288,7 +330,7 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
 
       function element(el: AST.VElement, attrs: (AST.VAttribute | AST.VDirective)[]): ChildData {
         const vSlot = attrs.find(isVSlot);
-        if (vSlot) {
+        if (vSlot && isVDirective(vSlot)) {
           const index = attrs.indexOf(vSlot);
           const scope = el.variables.filter((v) => v.kind === 'scope').map((v) => v.id.name);
 
@@ -303,9 +345,9 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
         // s-for has higher priority than s-if
         // https://vuejs.org/v2/guide/list.html#s-for-with-s-if
         const vFor = attrs.find(isVFor);
-        if (vFor) {
+        if (vFor && isVDirective(vFor)) {
           const index = attrs.indexOf(vFor);
-          const scope = el.variables.filter((v) => v.kind === 's-for').map((v) => v.id.name);
+          const scope = el.variables.filter((v) => v.kind === 's-for' as any).map((v) => v.id.name);
 
           return {
             type: 's-for',
@@ -316,7 +358,7 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
         }
 
         const vIf = attrs.find(isVIf);
-        if (vIf) {
+        if (vIf && isVDirective(vIf)) {
           const index = attrs.indexOf(vIf);
           return {
             type: 's-if-family',
@@ -341,7 +383,7 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
         const attrs = el.startTag.attributes;
         const directive = attrs.find(isVElseIf) || attrs.find(isVElse);
 
-        if (!directive) {
+        if (!directive || !isVDirective(directive)) {
           return undefined;
         }
 
@@ -392,11 +434,13 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
       function vIfFamilyTransform(vIfFamily: VIfFamilyData, scope: string[]): ts.Expression {
         const dir = vIfFamily.directive;
 
-        const condition = dir.value ? transformExpressionContainer(dir.value, code, scope) : ts.createLiteral(true);
-        const next = vIfFamily.next ? vIfFamilyTransform(vIfFamily.next, scope) : ts.createLiteral(true);
+        const condition = dir.value
+          ? transformExpressionContainer(dir.value, code, scope)
+          : tsModule.createLiteral(true);
+        const next = vIfFamily.next ? vIfFamilyTransform(vIfFamily.next, scope) : tsModule.createLiteral(true);
 
-        return ts.createConditional(
-          // s-if or s-else-if condition
+        return tsModule.createConditional(
+          // v-if or v-else-if condition
           condition,
 
           // element that the s-if family directive belongs to
@@ -417,18 +461,18 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
         const exp = vFor.value.expression as AST.VForExpression;
         const newScope = scope.concat(vForData.scope);
 
-        return ts.createCall(ts.createIdentifier(iterationHelperName), undefined, [
+        return tsModule.createCall(tsModule.createIdentifier(iterationHelperName), undefined, [
           // Iteration target
           transformExpression(exp.right, code, scope),
 
           // Callback
 
-          ts.createArrowFunction(
+          tsModule.createArrowFunction(
             undefined,
             undefined,
             parseParams(exp.left, code, scope),
             undefined,
-            ts.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+            tsModule.createToken(tsModule.SyntaxKind.EqualsGreaterThanToken),
             genericTransform(vForData.data, newScope)
           ),
         ]);
@@ -443,12 +487,12 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
         const exp = vSlot.value.expression as AST.VSlotScopeExpression;
         const newScope = scope.concat(vSlotData.scope);
 
-        return ts.createArrowFunction(
+        return tsModule.createArrowFunction(
           undefined,
           undefined,
           parseParams(exp.params, code, scope),
           undefined,
-          ts.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+          tsModule.createToken(tsModule.SyntaxKind.EqualsGreaterThanToken),
           genericTransform(vSlotData.data, newScope)
         );
       }
@@ -461,7 +505,7 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
           case 'VExpressionContainer':
             return transformExpressionContainer(child, code, scope);
           case 'VText':
-            return ts.createLiteral(child.value);
+            return tsModule.createLiteral(child.value);
         }
       }
 
@@ -479,10 +523,10 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
   function transformStatement(statement: AST.ESLintStatement, code: string, scope: string[]): ts.Statement {
     if (statement.type !== 'ExpressionStatement') {
       console.error('Unexpected statement type:', statement.type);
-      return ts.createExpressionStatement(ts.createLiteral(''));
+      return tsModule.createExpressionStatement(tsModule.createLiteral(''));
     }
 
-    return ts.createExpressionStatement(transformExpression(statement.expression, code, scope));
+    return tsModule.createExpressionStatement(transformExpression(statement.expression, code, scope));
   }
 
   function transformFilter(filter: AST.VFilterSequenceExpression, code: string, scope: string[]): ts.Expression {
@@ -492,10 +536,10 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
     // we just want to check their types.
     // Do not care about existence of filters and matching between parameter
     // and argument types because filters will not appear on component type.
-    const filterExps = ts.createArrayLiteral(
-      filter.filters.map((f) => {
-        return ts.createArrayLiteral(
-          f.arguments.map((arg) => {
+    const filterExps = tsModule.createArrayLiteral(
+      filter.filters.map(f => {
+        return tsModule.createArrayLiteral(
+          f.arguments.map(arg => {
             const exp = arg.type === 'SpreadElement' ? arg.argument : arg;
             return transformExpression(exp, code, scope);
           })
@@ -503,7 +547,7 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
       })
     );
 
-    return ts.createBinary(filterExps, ts.SyntaxKind.BarBarToken, exp);
+    return tsModule.createBinary(filterExps, tsModule.SyntaxKind.BarBarToken, exp);
   }
 
   function transformExpressionContainer(
@@ -539,19 +583,19 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
   function parseExpression(exp: string, scope: string[], start: number): ts.Expression {
     // Add parenthesis to deal with object literal expression
     const wrappedExp = '(' + exp + ')';
-    const source = ts.createSourceFile('/tmp/parsed.ts', wrappedExp, ts.ScriptTarget.Latest, true);
+    const source = tsModule.createSourceFile('/tmp/parsed.ts', wrappedExp, tsModule.ScriptTarget.Latest, true);
     const statement = source.statements[0];
 
-    if (!statement || !ts.isExpressionStatement(statement)) {
+    if (!statement || !tsModule.isExpressionStatement(statement)) {
       console.error('Unexpected statement kind:', statement.kind);
-      return ts.createLiteral('');
+      return tsModule.createLiteral('');
     }
 
     const parenthesis = statement.expression as ts.ParenthesizedExpression;
 
     // Compensate for the added `(` that adds 1 to each Node's offset
     const offset = start - '('.length;
-    return walkExpression(ts, parenthesis.expression, createWalkCallback(scope, offset, source));
+    return walkExpression(tsModule, parenthesis.expression, createWalkCallback(scope, offset, source));
   }
 
   function expressionCodeRange(container: AST.VExpressionContainer): [number, number] {
@@ -597,58 +641,58 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
   }
 
   function injectThis(exp: ts.Expression, scope: string[], start: number, source: ts.SourceFile): ts.Expression {
-    if (ts.isIdentifier(exp)) {
-      return scope.indexOf(exp.text) < 0 ? ts.createPropertyAccess(ts.createThis(), exp) : exp;
+    if (tsModule.isIdentifier(exp)) {
+      return scope.indexOf(exp.text) < 0 ? tsModule.createPropertyAccess(tsModule.createThis(), exp) : exp;
     }
 
-    if (ts.isObjectLiteralExpression(exp)) {
-      const properties = exp.properties.map((p) => {
-        if (!ts.isShorthandPropertyAssignment(p)) {
+    if (tsModule.isObjectLiteralExpression(exp)) {
+      const properties = exp.properties.map(p => {
+        if (!tsModule.isShorthandPropertyAssignment(p)) {
           return p;
         }
 
         // Divide short hand property to name and initializer and inject `this`
         // We need to walk generated initializer expression.
         const initializer = createWalkCallback(scope, start, source)(p.name, []);
-        return ts.createPropertyAssignment(p.name, initializer);
+        return tsModule.createPropertyAssignment(p.name, initializer);
       });
-      return ts.createObjectLiteral(properties);
+      return tsModule.createObjectLiteral(properties);
     }
 
     return exp;
   }
 
   function setSourceMapRange(exp: ts.Expression, range: ts.Expression, offset: number, source: ts.SourceFile): void {
-    ts.setSourceMapRange(exp, {
+    tsModule.setSourceMapRange(exp, {
       pos: offset + range.getStart(source),
       end: offset + range.getEnd(),
     });
 
-    if (ts.isPropertyAccessExpression(exp)) {
+    if (tsModule.isPropertyAccessExpression(exp)) {
       // May be transformed from Identifier by injecting `this`
-      const r = ts.isPropertyAccessExpression(range) ? range.name : range;
-      ts.setSourceMapRange(exp.name, {
+      const r = tsModule.isPropertyAccessExpression(range) ? range.name : range;
+      tsModule.setSourceMapRange(exp.name, {
         pos: offset + r.getStart(source),
         end: offset + r.getEnd(),
       });
       return;
     }
 
-    if (ts.isArrowFunction(exp)) {
+    if (tsModule.isArrowFunction(exp)) {
       const walkBinding = (name: ts.BindingName, range: ts.BindingName) => {
-        ts.setSourceMapRange(name, {
+        tsModule.setSourceMapRange(name, {
           pos: offset + range.getStart(source),
           end: offset + range.getEnd(),
         });
 
-        if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+        if (tsModule.isObjectBindingPattern(name) || tsModule.isArrayBindingPattern(name)) {
           name.elements.forEach((el, i) => {
-            if (ts.isOmittedExpression(el)) {
+            if (tsModule.isOmittedExpression(el)) {
               return;
             }
             const elRange = (range as typeof name).elements[i] as typeof el;
 
-            ts.setSourceMapRange(el, {
+            tsModule.setSourceMapRange(el, {
               pos: offset + elRange.getStart(source),
               end: offset + elRange.getEnd(),
             });
@@ -661,7 +705,7 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
       const r = range as ts.ArrowFunction;
       exp.parameters.forEach((p, i) => {
         const range = r.parameters[i];
-        ts.setSourceMapRange(p, {
+        tsModule.setSourceMapRange(p, {
           pos: offset + range.getStart(source),
           end: offset + range.getEnd(),
         });
@@ -676,10 +720,10 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
    * Set them to synthetic positions so printers could print correctly
    */
   function resetTextRange(exp: ts.Expression): void {
-    if (ts.isObjectLiteralExpression(exp)) {
+    if (tsModule.isObjectLiteralExpression(exp)) {
       exp.properties.forEach((p, i) => {
-        if (ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name)) {
-          ts.setTextRange(p.name, {
+        if (tsModule.isPropertyAssignment(p) && !tsModule.isComputedPropertyName(p.name)) {
+          tsModule.setTextRange(p.name, {
             pos: -1,
             end: -1,
           });
@@ -687,48 +731,64 @@ export function getTemplateTransformFunctions(ts: T_TypeScript) {
       });
     }
 
-    if (ts.isTemplateExpression(exp)) {
-      ts.setTextRange(exp.head, { pos: -1, end: -1 });
-      exp.templateSpans.forEach((span) => {
-        ts.setTextRange(span.literal, {
+    if (tsModule.isTemplateExpression(exp)) {
+      tsModule.setTextRange(exp.head, { pos: -1, end: -1 });
+      exp.templateSpans.forEach(span => {
+        tsModule.setTextRange(span.literal, {
           pos: -1,
           end: -1,
         });
       });
     }
 
-    ts.setTextRange(exp, { pos: -1, end: -1 });
+    tsModule.setTextRange(exp, { pos: -1, end: -1 });
   }
 
   function isVAttribute(node: AST.VAttribute | AST.VDirective): node is AST.VAttribute {
     return !node.directive;
   }
 
-  function isVBind(node: AST.VAttribute | AST.VDirective): node is AST.VDirective {
+  function isVDirective(node: AST.VAttribute | AST.VDirective): node is AST.VDirective {
+    return node.directive;
+  }
+
+  function isVModel(node: AST.VAttribute | AST.VDirective): boolean {
+    return node.directive && node.key.name.name === 'model';
+  }
+
+  function isVBind(node: AST.VAttribute | AST.VDirective): boolean {
     return node.directive && node.key.name.name === 'bind';
   }
 
-  function isVOn(node: AST.VAttribute | AST.VDirective): node is AST.VDirective {
+  function isVBindShorthand(node: AST.VAttribute | AST.VDirective): boolean {
+    return node.directive && node.key.name.name === 'bind' && node.key.name.rawName === ':';
+  }
+
+  function isVBindWithDynamicAttributeName(node: AST.VAttribute | AST.VDirective): boolean {
+    return node.directive && node.key.argument?.type === 'VExpressionContainer';
+  }
+
+  function isVOn(node: AST.VAttribute | AST.VDirective): boolean {
     return node.directive && node.key.name.name === 'on';
   }
 
-  function isVIf(node: AST.VAttribute | AST.VDirective): node is AST.VDirective {
+  function isVIf(node: AST.VAttribute | AST.VDirective): boolean {
     return node.directive && node.key.name.name === 'if';
   }
 
-  function isVElseIf(node: AST.VAttribute | AST.VDirective): node is AST.VDirective {
+  function isVElseIf(node: AST.VAttribute | AST.VDirective): boolean {
     return node.directive && node.key.name.name === 'else-if';
   }
 
-  function isVElse(node: AST.VAttribute | AST.VDirective): node is AST.VDirective {
+  function isVElse(node: AST.VAttribute | AST.VDirective): boolean {
     return node.directive && node.key.name.name === 'else';
   }
 
-  function isVFor(node: AST.VAttribute | AST.VDirective): node is AST.VDirective {
+  function isVFor(node: AST.VAttribute | AST.VDirective): boolean {
     return node.directive && node.key.name.name === 'for';
   }
 
-  function isVSlot(node: AST.VAttribute | AST.VDirective): node is AST.VDirective {
+  function isVSlot(node: AST.VAttribute | AST.VDirective): boolean {
     return node.directive && (node.key.name.name === 'slot' || node.key.name.name === 'slot-scope');
   }
 }

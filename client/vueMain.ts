@@ -1,5 +1,5 @@
-import * as vscode from 'vscode';
-import { LanguageClient, WorkspaceEdit } from 'vscode-languageclient';
+import vscode from 'vscode';
+import { LanguageClient } from 'vscode-languageclient';
 import { generateGrammarCommandHandler } from './commands/generateGrammarCommand';
 import { registerLanguageConfigurations } from './languages';
 import { initializeLanguageClient } from './client';
@@ -11,6 +11,7 @@ import {
 } from './commands/virtualFileCommand';
 import { getGlobalSnippetDir } from './userSnippetDir';
 import { generateOpenUserScaffoldSnippetFolderCommand } from './commands/openUserScaffoldSnippetFolderCommand';
+import { generateDoctorCommand } from './commands/doctorCommand';
 
 export async function activate(context: vscode.ExtensionContext) {
   const isInsiders = vscode.env.appName.includes('Insiders');
@@ -38,15 +39,15 @@ export async function activate(context: vscode.ExtensionContext) {
     )
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('vetur.chooseTypeScriptRefactoring', (args: any) => {
-      client.sendRequest<WorkspaceEdit | undefined>('requestCodeActionEdits', args).then((edits) => {
-        if (edits) {
-          vscode.workspace.applyEdit(client.protocol2CodeConverter.asWorkspaceEdit(edits)!);
-        }
-      });
-    })
-  );
+  // context.subscriptions.push(
+  //   vscode.commands.registerCommand('vetur.chooseTypeScriptRefactoring', (args: any) => {
+  //     client.sendRequest<WorkspaceEdit | undefined>('requestCodeActionEdits', args).then((edits) => {
+  //       if (edits) {
+  //         vscode.workspace.applyEdit(client.protocol2CodeConverter.asWorkspaceEdit(edits)!);
+  //       }
+  //     });
+  //   })
+  // );
 
   registerLanguageConfigurations();
 
@@ -63,11 +64,17 @@ export async function activate(context: vscode.ExtensionContext) {
     .then(() => {
       registerCustomClientNotificationHandlers(client);
       registerCustomLSPCommands(context, client);
+      registerRestartVLSCommand(context, client);
     })
-    .catch((e) => {
+    .catch(e => {
+      console.error(e.stack);
       console.log('Client initialization failed');
     });
 
+  return displayInitProgress(promise);
+}
+
+async function displayInitProgress(promise: Promise<void>) {
   return vscode.window.withProgress(
     {
       title: 'Sanny initialization',
@@ -77,15 +84,22 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 }
 
+function registerRestartVLSCommand(context: vscode.ExtensionContext, client: LanguageClient) {
+  context.subscriptions.push(
+    vscode.commands.registerCommand('vetur.restartVLS', () =>
+      displayInitProgress(
+        client
+          .stop()
+          .then(() => client.start())
+          .then(() => client.onReady())
+      )
+    )
+  );
+}
+
 function registerCustomClientNotificationHandlers(client: LanguageClient) {
-  client.onNotification('$/displayInfo', (msg: string) => {
-    vscode.window.showInformationMessage(msg);
-  });
-  client.onNotification('$/displayWarning', (msg: string) => {
-    vscode.window.showWarningMessage(msg);
-  });
-  client.onNotification('$/displayError', (msg: string) => {
-    vscode.window.showErrorMessage(msg);
+  client.onNotification('$/openWebsite', (url: string) => {
+    vscode.env.openExternal(vscode.Uri.parse(url));
   });
   client.onNotification('$/showVirtualFile', (virtualFileSource: string, prettySourceMap: string) => {
     setVirtualContents(virtualFileSource, prettySourceMap);
@@ -94,6 +108,8 @@ function registerCustomClientNotificationHandlers(client: LanguageClient) {
 
 function registerCustomLSPCommands(context: vscode.ExtensionContext, client: LanguageClient) {
   context.subscriptions.push(
-    vscode.commands.registerCommand('vetur.showCorrespondingVirtualFile', generateShowVirtualFileCommand(client))
+    vscode.commands.registerCommand('vetur.showCorrespondingVirtualFile', generateShowVirtualFileCommand(client)),
+    vscode.commands.registerCommand('vetur.showOutputChannel', () => client.outputChannel.show()),
+    vscode.commands.registerCommand('vetur.showDoctorInfo', generateDoctorCommand(client))
   );
 }
