@@ -1,39 +1,37 @@
-import { TextDocument, Position, Range } from 'vscode-languageserver-types';
+import { Position, Range } from 'vscode-languageserver-types';
+import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { LanguageMode } from '../../embeddedSupport/languageModes';
-import { prettierify } from '../../utils/prettier';
+import { prettierPluginPugify } from '../../utils/prettier';
 import { VLSFormatConfig } from '../../config';
 import { getFileFsPath } from '../../utils/paths';
+import { DependencyService } from '../../services/dependencyService';
+import { EnvironmentService } from '../../services/EnvironmentService';
 
-export function getPugMode(): LanguageMode {
-  let config: any = {};
-
+export function getPugMode(env: EnvironmentService, dependencyService: DependencyService): LanguageMode {
   return {
     getId() {
       return 'pug';
     },
-    configure(c) {
-      config = c;
-    },
     format(document, currRange, formattingOptions) {
-      if (config.vetur.format.defaultFormatter['pug'] === 'none') {
+      if (env.getConfig().vetur.format.defaultFormatter['pug'] === 'none') {
         return [];
       }
 
       const { value, range } = getValueAndRange(document, currRange);
 
-      const foo = prettierify(
+      return prettierPluginPugify(
+        dependencyService,
         value,
         getFileFsPath(document.uri),
         range,
-        config.vetur.format as VLSFormatConfig,
+        env.getConfig().vetur.format as VLSFormatConfig,
+        // @ts-expect-error
         'pug',
         false
       );
-
-      return foo;
     },
     onDocumentRemoved() {},
-    dispose() {},
+    dispose() {}
   };
 }
 

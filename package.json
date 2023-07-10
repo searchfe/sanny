@@ -3,26 +3,27 @@
   "displayName": "sanny",
   "description": "San tooling for VS Code",
   "icon": "asset/san.png",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "suyanzhi",
   "scripts": {
     "postinstall": "run-s install:*",
     "install:server": "cd server && yarn",
     "install:vti": "cd vti && yarn",
-    "build:grammar": "tsc -p . && node dist/scripts/build_grammar",
-    "compile": "run-s compile:source copy:snippets",
-    "compile:source": "tsc -b .",
-    "watch": "run-s compile copy:snippets watch:build",
-    "watch:build": "tsc -b -w .",
-    "copy:snippets": "node ./build/copy-snippets.js",
+    "build:grammar": "ts-node --project scripts/tsconfig.json scripts/build_grammar",
+    "compile": "rollup -c rollup.config.js",
+    "watch": "rollup -c rollup.config.js -w",
     "lint": "tslint -c tslint.json client/**/*.ts server/**/*.ts scripts/**/*.ts",
-    "test:server": "npm run compile && cd server && npm test",
-    "test:e2e": "node ./dist/test/codeTestRunner.js",
-    "test:grammar": "node ./dist/test/codeTestRunner.js grammar",
-    "test:lsp": "node ./dist/test/codeTestRunner.js lsp",
-    "test:int": "node ./dist/test/codeTestRunner.js interpolation",
-    "test:vue3": "node ./dist/test/codeTestRunner.js vue3",
-    "test": "run-s compile test:server test:e2e",
+    "build:test": "tsc -p test/tsconfig.json",
+    "pretest": "yarn build:test",
+    "test:server": "cd server && yarn test",
+    "test:e2e": "node ./dist-test/test/codeTestRunner.js",
+    "test:grammar": "node ./dist-test/test/codeTestRunner.js grammar",
+    "test:lsp": "node ./dist-test/test/codeTestRunner.js lsp",
+    "test:int": "node ./dist-test/test/codeTestRunner.js interpolation",
+    "test:vue3": "node ./dist-test/test/codeTestRunner.js vue3",
+    "test:componentData": "node ./dist-test/test/codeTestRunner.js componentData",
+    "test:monorepo": "node ./dist-test/test/codeTestRunner.js monorepo",
+    "test": "run-s test:server test:e2e",
     "docs": "bash ./build/update-docs.sh",
     "prepare-publish": "./build/release-cleanup.sh"
   },
@@ -53,27 +54,41 @@
   "engines": {
     "vscode": "^1.47.0"
   },
-  "dependencies": {
-    "vscode-languageclient": "^6.1.3",
-    "vscode-languageserver-types": "^3.15.1"
-  },
   "activationEvents": [
     "onLanguage:san"
   ],
-  "main": "./dist/client/vueMain",
+  "main": "./dist/vueMain.js",
   "contributes": {
     "commands": [
       {
+        "command": "vetur.restartVLS",
+        "category": "Vetur",
+        "title": "Restart VLS (Vue Language Server)"
+      },
+      {
         "command": "vetur.generateGrammar",
-        "title": "Vetur: Generate grammar from `vetur.grammar.customBlocks`"
+        "category": "Vetur",
+        "title": "Generate grammar from `vetur.grammar.customBlocks`"
       },
       {
         "command": "vetur.showCorrespondingVirtualFile",
-        "title": "Vetur: Show corresponding virtual file and sourcemap"
+        "category": "Vetur",
+        "title": "Show corresponding virtual file and sourcemap"
       },
       {
         "command": "vetur.openUserScaffoldSnippetFolder",
-        "title": "Vetur: Open user scaffold snippet folder"
+        "category": "Vetur",
+        "title": "Open user scaffold snippet folder"
+      },
+      {
+        "command": "vetur.showOutputChannel",
+        "category": "Vetur",
+        "title": "Show Output Channel"
+      },
+      {
+        "command": "vetur.showDoctorInfo",
+        "category": "Vetur",
+        "title": "Show Doctor info"
       }
     ],
     "breakpoints": [
@@ -135,6 +150,7 @@
           "text.jade.slm": "slm",
           "text.pug": "jade",
           "text.haml": "haml",
+          "text.slim": "slim",
           "text.html.liquid": "liquid",
           "source.css": "css",
           "source.css.scss": "scss",
@@ -169,6 +185,12 @@
     "configuration": {
       "title": "Vetur",
       "properties": {
+        "vetur.ignoreProjectWarning": {
+          "type": "boolean",
+          "default": false,
+          "description": "Vetur will warn about not setup correctly for the project. You can disable it.",
+          "scope": "application"
+        },
         "vetur.useWorkspaceDependencies": {
           "type": "boolean",
           "default": false,
@@ -232,6 +254,16 @@
           "default": true,
           "description": "Validate vue-html in <template> using eslint-plugin-vue"
         },
+        "vetur.validation.templateProps": {
+          "type": "boolean",
+          "default": false,
+          "description": "Validate props usage in <template> region. Show error/warning for not passing declared props to child components and show error for passing wrongly typed interpolation expressions"
+        },
+        "vetur.validation.interpolation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Validate interpolations in <template> region using TypeScript language service"
+        },
         "vetur.validation.style": {
           "type": "boolean",
           "default": true,
@@ -259,7 +291,7 @@
         },
         "vetur.format.defaultFormatter.html": {
           "type": "string",
-          "default": "prettyhtml",
+          "default": "prettier",
           "enum": [
             "none",
             "prettyhtml",
@@ -268,7 +300,7 @@
           ],
           "enumDescriptions": [
             "disable formatting",
-            "prettyhtml",
+            "🚧 [DEPRECATED] prettyhtml",
             "html formatter of js-beautify",
             "prettier"
           ],
@@ -460,6 +492,11 @@
           "default": false,
           "description": "Whether to have initial indent for <script> region"
         },
+        "vetur.languageFeatures.codeActions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to enable codeActions"
+        },
         "vetur.trace.server": {
           "type": "string",
           "enum": [
@@ -496,34 +533,45 @@
         "vetur.experimental.templateInterpolationService": {
           "type": "boolean",
           "default": false,
-          "description": "Enable template interpolation service that offers diagnostics / hover / definition / references."
+          "description": "Enable template interpolation service that offers hover / definition / references in Vue interpolations."
         }
       }
     }
   },
   "devDependencies": {
+    "@rollup/plugin-commonjs": "^17.0.0",
+    "@rollup/plugin-json": "^4.1.0",
+    "@rollup/plugin-node-resolve": "^11.0.0",
+    "@rollup/plugin-replace": "^2.3.3",
     "@types/glob": "^7.1.3",
     "@types/js-yaml": "^3.12.5",
-    "@types/lodash": "^4.14.159",
-    "@types/minimist": "^1.2.0",
-    "@types/mocha": "^8.0.1",
-    "@types/node": "^14.0.27",
+    "@types/lodash": "^4.14.163",
+    "@types/minimist": "^1.2.1",
+    "@types/mocha": "^8.2.0",
+    "@types/node": "^14.14.11",
     "@types/shelljs": "^0.8.8",
     "@types/vscode": "^1.47.0",
+    "esbuild": "^0.8.21",
     "fs-extra": "^9.0.1",
     "glob": "^7.1.6",
-    "husky": "^4.2.5",
-    "js-yaml": "^3.14.0",
-    "lint-staged": "^10.2.11",
+    "husky": "^4.3.5",
+    "js-yaml": "^3.14.1",
+    "lint-staged": "^10.5.3",
     "minimist": "^1.2.5",
-    "mocha": "^8.1.1",
-    "ncp": "^2.0.0",
+    "mocha": "^8.2.1",
     "npm-run-all": "^4.1.5",
-    "prettier": "^2.0.5",
-    "rimraf": "^3.0.2",
+    "prettier": "^2.2.1",
+    "rollup": "^2.34.2",
+    "rollup-plugin-delete": "^2.0.0",
+    "rollup-plugin-dts": "^2.0.0",
+    "rollup-plugin-terser": "^7.0.2",
+    "rollup-plugin-typescript2": "^0.29.0",
     "shelljs": "^0.8.4",
+    "ts-node": "^9.1.1",
     "tslint": "^6.1.3",
-    "typescript": "^3.9.7",
-    "vscode-test": "^1.4.0"
+    "typescript": "^4.1.2",
+    "vscode-languageclient": "^6.1.3",
+    "vscode-languageserver-types": "^3.15.1",
+    "vscode-test": "^1.4.1"
   }
 }

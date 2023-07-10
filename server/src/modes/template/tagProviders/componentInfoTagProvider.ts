@@ -18,8 +18,8 @@ export function getComponentInfoTagProvider(childComponents: ChildComponent[]): 
   for (const cc of childComponents) {
     const props: Attribute[] = [];
     if (cc.info && cc.info.componentInfo.props) {
-      cc.info.componentInfo.props.forEach((p) => {
-        props.push(genAttribute(p.name, undefined, { kind: 'markdown', value: p.documentation || '' }));
+      cc.info.componentInfo.props.forEach(p => {
+        props.push(genAttribute(`:${p.name}`, undefined, { kind: 'markdown', value: p.documentation || '' }));
       });
     }
     tagSet[cc.name] = new HTMLTagSpecification(

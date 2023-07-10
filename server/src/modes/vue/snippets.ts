@@ -1,6 +1,7 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import fs from 'fs';
+import path from 'path';
 import { CompletionItem, InsertTextFormat, CompletionItemKind, MarkupContent } from 'vscode-languageserver-types';
+import { logger } from '../../log';
 
 type SnippetSource = 'workspace' | 'user' | 'vetur';
 type SnippetType = 'file' | 'template' | 'style' | 'script' | 'custom';
@@ -21,8 +22,8 @@ export interface ScaffoldSnippetSources {
 export class SnippetManager {
   private _snippets: Snippet[] = [];
 
-  constructor(workspacePath: string, globalSnippetDir?: string) {
-    const workspaceSnippets = loadAllSnippets(path.resolve(workspacePath, '.vscode/vetur/snippets'), 'workspace');
+  constructor(snippetFolder: string, globalSnippetDir?: string) {
+    const workspaceSnippets = loadAllSnippets(snippetFolder, 'workspace');
     const userSnippets = globalSnippetDir ? loadAllSnippets(globalSnippetDir, 'user') : [];
     const veturSnippets = loadAllSnippets(path.resolve(__dirname, './veturSnippets'), 'vetur');
 
@@ -93,7 +94,9 @@ function loadAllSnippets(rootDir: string, source: SnippetSource): Snippet[] {
         snippets = [...snippets, ...customDirSnippets];
       }
     });
-  } catch (err) {}
+  } catch (err) {
+    logger.logDebug(err.message);
+  }
 
   return snippets;
 }
@@ -116,7 +119,9 @@ function loadSnippetsFromDir(dir: string, source: SnippetSource, type: SnippetTy
           content: fs.readFileSync(path.resolve(dir, p), 'utf-8').replace(/\\t/g, '\t'),
         });
       });
-  } catch (err) {}
+  } catch (err) {
+    logger.logDebug(err.message);
+  }
 
   return snippets;
 }

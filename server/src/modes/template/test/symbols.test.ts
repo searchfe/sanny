@@ -4,9 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import * as assert from 'assert';
+import assert from 'assert';
 
-import { TextDocument, SymbolInformation, SymbolKind, Location, Range } from 'vscode-languageserver-types';
+import { SymbolInformation, SymbolKind, Location, Range } from 'vscode-languageserver-types';
+import { TextDocument } from 'vscode-languageserver-textdocument';
 import { parseHTMLDocument } from '../parser/htmlParser';
 import { findDocumentSymbols } from '../services/htmlSymbolsProvider';
 
@@ -138,6 +139,33 @@ suite('HTML Symbols', () => {
         kind: SymbolKind.Field,
         location: Location.create(TEST_URI, Range.create(0, 0, 0, 19)),
       },
+    ]);
+  });
+
+  test('Slot-related attributes', () => {
+    const content =
+      '<slot name="someslot"></slot>' +
+      '<template #withhash="scopedProp"></template>' +
+      '<template v-slot:withvslot="scopedProp"></template>';
+    testSymbolsFor(content, [
+      {
+        containerName: '',
+        name: 'slot[name="someslot"]',
+        kind: SymbolKind.Field,
+        location: Location.create(TEST_URI, Range.create(0, 0, 0, 29))
+      },
+      {
+        containerName: '',
+        name: 'template[#withhash]',
+        kind: SymbolKind.Field,
+        location: Location.create(TEST_URI, Range.create(0, 29, 0, 73))
+      },
+      {
+        containerName: '',
+        name: 'template[v-slot:withvslot]',
+        kind: SymbolKind.Field,
+        location: Location.create(TEST_URI, Range.create(0, 73, 0, 124))
+      }
     ]);
   });
 });

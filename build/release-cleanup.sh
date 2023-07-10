@@ -1,5 +1,5 @@
 # Deps
-yarn
+yarn --prod
 
 # Compile / Test
 yarn compile

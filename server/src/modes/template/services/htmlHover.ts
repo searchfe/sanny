@@ -1,6 +1,7 @@
 import { HTMLDocument } from '../parser/htmlParser';
 import { TokenType, createScanner } from '../parser/htmlScanner';
-import { TextDocument, Range, Position, Hover } from 'vscode-languageserver-types';
+import { Range, Position, Hover } from 'vscode-languageserver-types';
+import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { IHTMLTagProvider } from '../tagProviders';
 import { NULL_HOVER } from '../../nullMode';
 import { toMarkupContent } from '../../../utils/strings';
@@ -37,7 +38,6 @@ export function doHover(
   }
 
   function getAttributeHover(tag: string, attribute: string, range: Range): Hover {
-    const hover: Hover = NULL_HOVER;
     for (const provider of tagProviders) {
       let hover: Hover | null = null;
       provider.collectAttributes(tag, (attr, type, documentation) => {

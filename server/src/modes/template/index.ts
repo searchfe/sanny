@@ -1,12 +1,5 @@
-import {
-  FormattingOptions,
-  Position,
-  Range,
-  TextDocument,
-  Hover,
-  Location,
-  CompletionItem,
-} from 'vscode-languageserver-types';
+import { FormattingOptions, Position, Range, Hover, Location, CompletionItem } from 'vscode-languageserver-types';
+import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { VueDocumentRegions } from '../../embeddedSupport/embeddedSupport';
 import { LanguageModelCache, getLanguageModelCache } from '../../embeddedSupport/languageModelCache';
 import { LanguageMode } from '../../embeddedSupport/languageModes';
@@ -15,40 +8,52 @@ import { DocumentContext } from '../../types';
 import { HTMLMode } from './htmlMode';
 import { VueInterpolationMode } from './interpolationMode';
 import { IServiceHost } from '../../services/typescriptService/serviceHost';
-import { T_TypeScript } from '../../services/dependencyService';
 import { HTMLDocument, parseHTMLDocument } from './parser/htmlParser';
-import { inferVueVersion } from '../../services/typescriptService/vueVersion';
+import { inferVueVersion } from '../../utils/vueVersion';
+import { DependencyService, RuntimeLibrary } from '../../services/dependencyService';
+import { VCancellationToken } from '../../utils/cancellationToken';
+import { AutoImportSfcPlugin } from '../plugins/autoImportSfcPlugin';
+import { EnvironmentService } from '../../services/EnvironmentService';
 
 type DocumentRegionCache = LanguageModelCache<VueDocumentRegions>;
 
 export class VueHTMLMode implements LanguageMode {
   private htmlMode: HTMLMode;
   private vueInterpolationMode: VueInterpolationMode;
+  private autoImportSfcPlugin: AutoImportSfcPlugin;
 
   constructor(
-    tsModule: T_TypeScript,
+    tsModule: RuntimeLibrary['typescript'],
     serviceHost: IServiceHost,
+    env: EnvironmentService,
     documentRegions: DocumentRegionCache,
-    workspacePath: string,
+    autoImportSfcPlugin: AutoImportSfcPlugin,
+    dependencyService: DependencyService,
     vueInfoService?: VueInfoService
   ) {
-    const vueDocuments = getLanguageModelCache<HTMLDocument>(10, 60, (document) => parseHTMLDocument(document));
-    const vueVersion = inferVueVersion(tsModule, workspacePath);
-    this.htmlMode = new HTMLMode(documentRegions, workspacePath, vueVersion, vueDocuments, vueInfoService);
-    this.vueInterpolationMode = new VueInterpolationMode(tsModule, serviceHost, vueDocuments);
+    const vueDocuments = getLanguageModelCache<HTMLDocument>(10, 60, document => parseHTMLDocument(document));
+    this.htmlMode = new HTMLMode(
+      documentRegions,
+      env,
+      dependencyService,
+      vueDocuments,
+      autoImportSfcPlugin,
+      vueInfoService
+    );
+    this.vueInterpolationMode = new VueInterpolationMode(tsModule, serviceHost, env, vueDocuments, vueInfoService);
+    this.autoImportSfcPlugin = autoImportSfcPlugin;
   }
   getId() {
     return 'san-html';
   }
-  configure(c: any) {
-    this.htmlMode.configure(c);
-    this.vueInterpolationMode.configure(c);
-  }
   queryVirtualFileInfo(fileName: string, currFileText: string) {
     return this.vueInterpolationMode.queryVirtualFileInfo(fileName, currFileText);
   }
-  doValidation(document: TextDocument) {
-    return this.htmlMode.doValidation(document).concat(this.vueInterpolationMode.doValidation(document));
+  async doValidation(document: TextDocument, cancellationToken?: VCancellationToken) {
+    return Promise.all([
+      this.vueInterpolationMode.doValidation(document, cancellationToken),
+      this.htmlMode.doValidation(document, cancellationToken)
+    ]).then(result => [...result[0], ...result[1]]);
   }
   doComplete(document: TextDocument, position: Position) {
     const htmlList = this.htmlMode.doComplete(document, position);
@@ -59,6 +64,9 @@ export class VueHTMLMode implements LanguageMode {
     };
   }
   doResolve(document: TextDocument, item: CompletionItem): CompletionItem {
+    if (this.autoImportSfcPlugin.isMyResolve(item)) {
+      return this.autoImportSfcPlugin.doResolve(document, item);
+    }
     return this.vueInterpolationMode.doResolve(document, item);
   }
   doHover(document: TextDocument, position: Position): Hover {
@@ -81,10 +89,12 @@ export class VueHTMLMode implements LanguageMode {
     return this.vueInterpolationMode.findReferences(document, position);
   }
   findDefinition(document: TextDocument, position: Position) {
-    const interpolationDefinition = this.vueInterpolationMode.findDefinition(document, position);
-    return interpolationDefinition.length > 0
-      ? interpolationDefinition
-      : this.htmlMode.findDefinition(document, position);
+    const htmlDefinition = this.htmlMode.findDefinition(document, position);
+
+    return htmlDefinition.length > 0 ? htmlDefinition : this.vueInterpolationMode.findDefinition(document, position);
+  }
+  getFoldingRanges(document: TextDocument) {
+    return this.htmlMode.getFoldingRanges(document);
   }
   onDocumentRemoved(document: TextDocument) {
     this.htmlMode.onDocumentRemoved(document);

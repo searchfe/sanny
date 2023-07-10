@@ -1,8 +1,15 @@
-import * as ts from 'typescript';
-import { getLastChild, buildDocumentation, getDefaultExportObjectLiteralExpr } from './componentInfo';
-import { T_TypeScript } from '../../services/dependencyService';
+import type ts from 'typescript';
+import {
+  getLastChild,
+  buildDocumentation,
+  getDefaultExportNode,
+  getClassDecoratorArgumentType,
+  isClassType
+} from './componentInfo';
+import { kebabCase } from 'lodash';
+import { RuntimeLibrary } from '../../services/dependencyService';
 
-interface InternalChildComponent {
+export interface InternalChildComponent {
   name: string;
   documentation?: string;
   definition?: {
@@ -10,16 +17,28 @@ interface InternalChildComponent {
     start: number;
     end: number;
   };
-  defaultExportExpr?: ts.Node;
+  defaultExportNode?: ts.Node;
 }
 
-export function getChildComponents(
-  tsModule: T_TypeScript,
+export function analyzeComponentsDefine(
+  tsModule: RuntimeLibrary['typescript'],
   defaultExportType: ts.Type,
   checker: ts.TypeChecker,
   tagCasing = 'kebab'
-): InternalChildComponent[] | undefined {
-  const componentsSymbol = checker.getPropertyOfType(defaultExportType, 'components');
+): { start: number; end: number; insertPos: number; list: InternalChildComponent[] } | undefined {
+  let componentsSymbol: ts.Symbol | undefined;
+
+  if (!isClassType(tsModule, defaultExportType)) {
+    componentsSymbol = checker.getPropertyOfType(defaultExportType, 'components');
+  } else {
+    // get decorator argument type when class
+    const classDecoratorArgumentType = getClassDecoratorArgumentType(tsModule, defaultExportType, checker);
+    if (!classDecoratorArgumentType) {
+      return undefined;
+    }
+    componentsSymbol = checker.getPropertyOfType(classDecoratorArgumentType, 'components');
+  }
+
   if (!componentsSymbol || !componentsSymbol.valueDeclaration) {
     return undefined;
   }
@@ -32,15 +51,20 @@ export function getChildComponents(
   if (componentsDeclaration.kind === tsModule.SyntaxKind.ObjectLiteralExpression) {
     const componentsType = checker.getTypeOfSymbolAtLocation(componentsSymbol, componentsDeclaration);
 
+    let insertPos = componentsDeclaration.getStart(componentsDeclaration.getSourceFile(), true) + 1;
     const result: InternalChildComponent[] = [];
-    checker.getPropertiesOfType(componentsType).forEach((s) => {
+    checker.getPropertiesOfType(componentsType).forEach((s, i, arr) => {
       if (!s.valueDeclaration) {
         return;
       }
 
       let componentName = s.name;
       if (tagCasing === 'kebab') {
-        componentName = hyphenate(s.name);
+        componentName = kebabCase(s.name);
+      }
+
+      if (i === arr.length - 1) {
+        insertPos = s.valueDeclaration.getEnd();
       }
 
       let objectLiteralSymbol: ts.Symbol | undefined;
@@ -56,35 +80,56 @@ export function getChildComponents(
       }
 
       if (objectLiteralSymbol.flags & tsModule.SymbolFlags.Alias) {
-        const definitionObjectLiteralSymbol = checker.getAliasedSymbol(objectLiteralSymbol);
-        if (definitionObjectLiteralSymbol.valueDeclaration) {
-          const defaultExportExpr = getDefaultExportObjectLiteralExpr(
-            tsModule,
-            definitionObjectLiteralSymbol.valueDeclaration.getSourceFile()
-          );
-          if (!defaultExportExpr) {
-            return;
-          }
-
-          result.push({
-            name: componentName,
-            documentation: buildDocumentation(tsModule, definitionObjectLiteralSymbol, checker),
-            definition: {
-              path: definitionObjectLiteralSymbol.valueDeclaration.getSourceFile().fileName,
-              start: defaultExportExpr.getStart(undefined, true),
-              end: defaultExportExpr.getEnd(),
-            },
-            defaultExportExpr,
-          });
+        const definitionSymbol = checker.getAliasedSymbol(objectLiteralSymbol);
+        if (!definitionSymbol.valueDeclaration) {
+          return;
         }
+        // const definitionObjectLiteralSymbol = checker.getAliasedSymbol(objectLiteralSymbol);
+        // if (definitionObjectLiteralSymbol.valueDeclaration) {
+        //   const defaultExportExpr = getDefaultExportObjectLiteralExpr(
+        //     tsModule,
+        //     definitionObjectLiteralSymbol.valueDeclaration.getSourceFile()
+        //   );
+        //   if (!defaultExportExpr) {
+        //     return;
+        //   }
+
+        //   result.push({
+        //     name: componentName,
+        //     documentation: buildDocumentation(tsModule, definitionObjectLiteralSymbol, checker),
+        //     definition: {
+        //       path: definitionObjectLiteralSymbol.valueDeclaration.getSourceFile().fileName,
+        //       start: defaultExportExpr.getStart(undefined, true),
+        //       end: defaultExportExpr.getEnd(),
+        //     },
+        //     defaultExportExpr,
+        //   });
+        // }
+
+        const sourceFile = definitionSymbol.valueDeclaration.getSourceFile();
+        const defaultExportNode = getDefaultExportNode(tsModule, sourceFile);
+        if (!defaultExportNode) {
+          return;
+        }
+
+        result.push({
+          name: componentName,
+          documentation: buildDocumentation(tsModule, definitionSymbol, checker),
+          definition: {
+            path: sourceFile.fileName,
+            start: defaultExportNode.getStart(sourceFile, true),
+            end: defaultExportNode.getEnd()
+          },
+          defaultExportNode
+        });
       }
     });
 
-    return result;
+    return {
+      start: componentsDeclaration.getStart(componentsDeclaration.getSourceFile(), true),
+      end: componentsDeclaration.getEnd(),
+      insertPos,
+      list: result
+    };
   }
-}
-
-const hyphenateRE = /\B([A-Z])/g;
-function hyphenate(word: string) {
-  return word.replace(hyphenateRE, '-$1').toLowerCase();
 }

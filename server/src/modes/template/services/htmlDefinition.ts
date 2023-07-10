@@ -1,6 +1,7 @@
 import { HTMLDocument } from '../parser/htmlParser';
 import { TokenType, createScanner } from '../parser/htmlScanner';
-import { TextDocument, Range, Position, Definition, Location } from 'vscode-languageserver-types';
+import { Range, Position, Location } from 'vscode-languageserver-types';
+import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { VueFileInfo } from '../../../services/vueInfoService';
 import { URI } from 'vscode-uri';
 import { kebabCase } from 'lodash';
@@ -12,14 +13,14 @@ export function findDefinition(
   position: Position,
   htmlDocument: HTMLDocument,
   vueFileInfo?: VueFileInfo
-): Definition {
+): Location[] {
   const offset = document.offsetAt(position);
   const node = htmlDocument.findNodeAt(offset);
   if (!node || !node.tag) {
     return [];
   }
 
-  function getTagDefinition(tag: string, range: Range, open: boolean): Definition {
+  function getTagDefinition(tag: string, range: Range, open: boolean): Location[] {
     if (vueFileInfo && vueFileInfo.componentInfo.childComponents) {
       for (const cc of vueFileInfo.componentInfo.childComponents) {
         if (![tag, tag.toLowerCase(), kebabCase(tag)].includes(cc.name)) {
@@ -34,7 +35,7 @@ export function findDefinition(
           // Todo: Resolve actual default export range
           range: Range.create(0, 0, 0, 0),
         };
-        return loc;
+        return [loc];
       }
     }
     return [];

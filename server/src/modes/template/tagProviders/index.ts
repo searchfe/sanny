@@ -10,13 +10,12 @@ import {
   getDependencyTagProvider,
   getWorkspaceTagProvider,
 } from './externalTagProviders';
-export { getComponentInfoTagProvider as getComponentTags } from './componentInfoTagProvider';
 export { IHTMLTagProvider } from './common';
 
-import * as ts from 'typescript';
-import * as fs from 'fs';
+import fs from 'fs';
 import { join } from 'path';
 import { getNuxtTagProvider } from './nuxtTags';
+import { normalizeFileNameResolve } from '../../../utils/paths';
 
 export let allTagProviders: IHTMLTagProvider[] = [
   getHTML5TagProvider(),
@@ -32,7 +31,7 @@ export interface CompletionConfiguration {
   [provider: string]: boolean;
 }
 
-export function getTagProviderSettings(workspacePath: string | null | undefined) {
+export function getTagProviderSettings(packagePath: string | undefined) {
   const settings: CompletionConfiguration = {
     '__vetur-workspace': true,
     html5: true,
@@ -48,29 +47,27 @@ export function getTagProviderSettings(workspacePath: string | null | undefined)
     nuxt: false,
     gridsome: false,
   };
-  if (!workspacePath) {
-    return settings;
-  }
   try {
-    const packagePath = ts.findConfigFile(workspacePath, ts.sys.fileExists, 'package.json');
     if (!packagePath) {
       return settings;
     }
+
+    const packageRoot = normalizeFileNameResolve(packagePath, '../');
 
     const rootPkgJson = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
     const dependencies = rootPkgJson.dependencies || {};
     const devDependencies = rootPkgJson.devDependencies || {};
 
-    if (dependencies['vue-router']) {
-      settings['router'] = true;
+    if (dependencies['vue-router'] || devDependencies['vue-router']) {
+      settings['vue-router'] = true;
     }
-    if (dependencies['element-ui']) {
+    if (dependencies['element-ui'] || devDependencies['element-ui']) {
       settings['element'] = true;
     }
-    if (dependencies['vue-onsenui']) {
+    if (dependencies['vue-onsenui'] || devDependencies['vue-onsenui']) {
       settings['onsen'] = true;
     }
-    if (dependencies['bootstrap-vue']) {
+    if (dependencies['bootstrap-vue'] || devDependencies['bootstrap-vue']) {
       settings['bootstrap'] = true;
     }
     if (dependencies['buefy'] || devDependencies['buefy']) {
@@ -100,7 +97,7 @@ export function getTagProviderSettings(workspacePath: string | null | undefined)
       dependencies['quasar-framework'] = '^0.0.17';
     }
     if (dependencies['nuxt'] || dependencies['nuxt-edge'] || devDependencies['nuxt'] || devDependencies['nuxt-edge']) {
-      const nuxtTagProvider = getNuxtTagProvider(workspacePath);
+      const nuxtTagProvider = getNuxtTagProvider(packageRoot);
       if (nuxtTagProvider) {
         settings['nuxt'] = true;
         allTagProviders.push(nuxtTagProvider);
@@ -110,19 +107,16 @@ export function getTagProviderSettings(workspacePath: string | null | undefined)
       settings['gridsome'] = true;
     }
 
-    const workspaceTagProvider = getWorkspaceTagProvider(workspacePath, rootPkgJson);
+    const workspaceTagProvider = getWorkspaceTagProvider(packageRoot, rootPkgJson);
     if (workspaceTagProvider) {
       allTagProviders.push(workspaceTagProvider);
     }
 
     for (const dep of [...Object.keys(dependencies), ...Object.keys(devDependencies)]) {
-      const runtimePkgJsonPath = ts.findConfigFile(
-        workspacePath,
-        ts.sys.fileExists,
-        join('node_modules', dep, 'package.json')
-      );
-
-      if (!runtimePkgJsonPath) {
+      let runtimePkgJsonPath;
+      try {
+        runtimePkgJsonPath = require.resolve(join(dep, 'package.json'), { paths: [packageRoot] });
+      } catch {
         continue;
       }
 
@@ -131,7 +125,7 @@ export function getTagProviderSettings(workspacePath: string | null | undefined)
         continue;
       }
 
-      const depTagProvider = getDependencyTagProvider(workspacePath, runtimePkgJson);
+      const depTagProvider = getDependencyTagProvider(packageRoot, runtimePkgJson);
       if (!depTagProvider) {
         continue;
       }
@@ -139,7 +133,9 @@ export function getTagProviderSettings(workspacePath: string | null | undefined)
       allTagProviders.push(depTagProvider);
       settings[dep] = true;
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error(e.stack);
+  }
   return settings;
 }
 

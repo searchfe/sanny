@@ -1,4 +1,5 @@
 import { platform } from 'os';
+import { isAbsolute, resolve } from 'path';
 import { URI } from 'vscode-uri';
 
 /**
@@ -61,4 +62,20 @@ export function getFilePath(documentUri: string): string {
 
 export function normalizeFileNameToFsPath(fileName: string) {
   return URI.file(fileName).fsPath;
+}
+
+export function normalizeFileNameResolve(...paths: string[]) {
+  return normalizeFileNameToFsPath(resolve(...paths));
+}
+
+export function getPathDepth(filePath: string, sep: string) {
+  return filePath.split(sep).length;
+}
+
+export function getFsPathToUri(fsPath: string) {
+  return URI.file(fsPath).toString();
+}
+
+export function normalizeAbsolutePath(fsPath: string, root: string) {
+  return isAbsolute(fsPath) ? normalizeFileNameToFsPath(fsPath) : normalizeFileNameResolve(root, fsPath);
 }

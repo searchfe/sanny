@@ -1,6 +1,6 @@
-import * as path from 'path';
-import * as Mocha from 'mocha';
-import * as glob from 'glob';
+import path from 'path';
+import Mocha from 'mocha';
+import glob from 'glob';
 
 export function run(): Promise<void> {
   const args = {};
@@ -11,13 +11,11 @@ export function run(): Promise<void> {
       args[k.slice('MOCHA_'.length)] = process.env[k];
     });
 
-  // Create the mocha test
   const mocha = new Mocha({
     ui: 'bdd',
     timeout: 100000,
     color: true,
-
-    ...args,
+    ...args
   });
 
   const testsRoot = __dirname;

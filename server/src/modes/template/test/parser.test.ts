@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import * as assert from 'assert';
+import assert from 'assert';
 import { Node, parse } from '../parser/htmlParser';
 
 suite('HTML Parser', () => {
@@ -187,10 +187,10 @@ suite('HTML Parser', () => {
             closed: true,
             endTagStart: undefined,
             isInterpolation: true,
-            children: [],
-          },
-        ],
-      },
+            children: []
+          }
+        ]
+      }
     ]);
     assertDocument('<div>{{test}}', [
       {
@@ -207,10 +207,10 @@ suite('HTML Parser', () => {
             closed: true,
             endTagStart: undefined,
             isInterpolation: true,
-            children: [],
-          },
-        ],
-      },
+            children: []
+          }
+        ]
+      }
     ]);
   });
 
